@@ -1,5 +1,9 @@
 # CallSpace
 
+[![User Guide](https://shields.io)](./docs/user-guide.md)
+[![API Reference](https://shields.io)](./docs/api-ref.md)
+[![Troubleshooting](https://shields.io)](./docs/errors.md)
+
 CallSpace is a browser-based contact manager with a simulated calling interface. It lets you save contacts, attach profile and call-screen images, and switch between saved images during a call-style experience.
 
 ## Features
