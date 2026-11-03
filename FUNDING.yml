@@ -1,1 +1,18 @@
-hello
+# .github/FUNDING.yml
+
+# Supported platforms
+
+github: [octocat, username2] # Up to 4 GitHub Sponsors usernames
+patreon: your-patreon-username
+open_collective: your-collective-name
+ko_fi: your_kofi_handle
+tidelift: npm/your-package-name
+community_bridge: community-bridge-project-name
+liberapay: liberapay-username
+issuehunt: issuehunt-username
+lfx_crowdfunding: lfx-project-name
+polar: polar-username
+buy_me_a_coffee: bmac_username
+
+# Custom links (Maximum of 4 allowed)
+custom: ['https://example.com', 'https://yourwebsite.com']
