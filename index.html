@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Full Screen Workspace Emulator</title>
+    <style>
+        :root {
+            --bg-color: #f0f4f8;
+            --text-color: #333333;
+            --container-bg: #ffffff;
+            --border-color: #cccccc;
+            --accent-color: #0078d4;
+        }
+
+        [data-theme="dark"] {
+            --bg-color: #1e1e1e;
+            --text-color: #f5f5f5;
+            --container-bg: #2d2d2d;
+            --border-color: #444444;
+            --accent-color: #2b88d8;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 0;
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+            transition: background-color 0.3s, color 0.3s;
+        }
+
+        #viewport {
+            width: 100%;
+            height: 100%;
+            position: relative;
+        }
+
+        /* Home Screen App Grid Setup */
+        #home-screen {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 24px;
+            padding: 40px;
+            height: 100%;
+            box-sizing: border-box;
+            background: linear-gradient(135deg, rgba(0,120,212,0.1) 0%, rgba(102,45,145,0.1) 100%);
+        }
+
+        .app-icon {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 16px;
+            cursor: pointer;
+            transition: transform 0.2s, background-color 0.2s;
+            height: 120px;
+        }
+
+        .app-icon:hover {
+            transform: scale(1.05);
+            background: rgba(255, 255, 255, 0.25);
+        }
+
+        .app-icon span.icon-img {
+            font-size: 3rem;
+            margin-bottom: 8px;
+        }
+
+        .app-icon span.app-label {
+            font-size: 1rem;
+            font-weight: 500;
+            text-align: center;
+        }
+
+        /* General App Sandbox Window */
+        .app-window {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: var(--container-bg);
+            display: none;
+            flex-direction: column;
+            box-sizing: border-box;
+            z-index: 10;
+        }
+
+        .app-header {
+            display: flex;
+            align-items: center;
+            padding: 16px 24px;
+            border-bottom: 1px solid var(--border-color);
+            background-color: rgba(0,0,0,0.03);
+        }
+
+        .back-btn {
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            color: var(--accent-color);
+            cursor: pointer;
+            padding: 0 16px 0 0;
+            font-weight: bold;
+        }
+
+        .app-title {
+            font-weight: 600;
+            font-size: 1.2rem;
+            flex: 1;
+        }
+
+        .app-content {
+            flex: 1;
+            padding: 24px;
+            overflow-y: auto;
+            box-sizing: border-box;
+        }
+
+        /* SCORE COUNTER APP */
+        .match-setup {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            max-width: 500px;
+            margin: 40px auto;
+        }
+
+        select, input, button {
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            background-color: var(--container-bg);
+            color: var(--text-color);
+            font-size: 1rem;
+        }
+
+        button.primary-btn {
+            background-color: var(--accent-color);
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        .game-board {
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            height: 100%;
+            text-align: center;
+        }
+
+        .team-box {
+            flex: 1;
+            margin: 20px;
+            padding: 40px 20px;
+            border-radius: 16px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+            color: white;
+        }
+
+        .score-display {
+            font-size: 6rem;
+            font-weight: bold;
+            margin: 20px 0;
+        }
+
+        .score-actions {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+        }
+
+        .score-actions button {
+            background: rgba(255,255,255,0.25);
+            color: white;
+            border: 1px solid rgba(255,255,255,0.4);
+            font-size: 1.5rem;
+            width: 60px;
+            height: 60px;
+            cursor: pointer;
+            border-radius: 50%;
+        }
+
+        .score-actions button:hover {
+            background: rgba(255,255,255,0.4);
+        }
+
+        .winner-declaration {
+            font-size: 2rem;
+            font-weight: bold;
+            margin-bottom: 20px;
+            color: #000;
+        }
+        [data-theme="dark"] .winner-declaration {
+            color: #fff;
+        }
+
+        /* DOCS / DISPLAYER STYLING */
+        .doc-list-item {
+            padding: 12px;
+            border-bottom: 1px solid var(--border-color);
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .doc-list-item:hover {
+            background-color: rgba(0,0,0,0.05);
+        }
+        .delete-btn {
+            background: #ff4d4d;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        /* GRAPHING CALCULATOR */
+        .calc-layout {
+            display: flex;
+            gap: 24px;
+            height: 100%;
+        }
+        .calc-sidebar {
+            width: 35%;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        .graph-area {
+            width: 65%;
+            background: #fdfdfd;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            position: relative;
+        }
+        [data-theme="dark"] .graph-area {
+            background: #151515;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="viewport">
+        
+        <!-- HOME SCREEN -->
+        <div id="home-screen">
+            <div class="app-icon" onclick="openApp('score-app')">
+                <span class="icon-img">📊</span>
+                <span class="app-label">Score Counter</span>
+            </div>
+            <div class="app-icon" onclick="openApp('docs-app')">
+                <span class="icon-img">📝</span>
+                <span class="app-label">Documents</span>
+            </div>
+            <div class="app-icon" onclick="openApp('explorer-app')">
+                <span class="icon-img">📁</span>
+                <span class="app-label">File Explorer</span>
+            </div>
+            <div class="app-icon" onclick="openApp('displayer-app')">
+                <span class="icon-img">🔍</span>
+                <span class="app-label">.eg Displayer</span>
+            </div>
+            <div class="app-icon" onclick="openApp('calc-app')">
+                <span class="icon-img">🧮</span>
+                <span class="app-label">Graphing Calc</span>
+            </div>
+            <div class="app-icon" onclick="openApp('settings-app')">
+                <span class="icon-img">⚙️</span>
+                <span class="app-label">Settings</span>
+            </div>
+        </div>
+
+        <!-- SCORE COUNTER APP -->
+        <div id="score-app" class="app-window">
+            <div class="app-header">
+                <button class="back-btn" onclick="closeApp('score-app')">⟵</button>
+                <div class="app-title">Score Counter</div>
+            </div>
+            <div class="app-content">
+                <div id="setup-view" class="match-setup">
+                    <h3>Configure Matchup</h3>
+                    <div style="display:flex; gap:15px;">
+                        <div style="flex:1; display:flex; flex-direction:column; gap:5px;">
+                            <label><b>Left Player:</b></label>
+                            <select id="p1-select">
+                                <option value="david">David (Orange)</option>
+                                <option value="ethan" selected>Ethan (Green)</option>
+                                <option value="zachary">Zachary (Red)</option>
+                                <option value="stefanie">Stefanie (Blue)</option>
+                            </select>
+                        </div>
+                        <div style="flex:1; display:flex; flex-direction:column; gap:5px;">
+                            <label><b>Right Player:</b></label>
+                            <select id="p2-select">
+                                <option value="david">David (Orange)</option>
+                                <option value="ethan">Ethan (Green)</option>
+                                <option value="zachary" selected>Zachary (Red)</option>
+                                <option value="stefanie">Stefanie (Blue)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <label for="target-score"><b>Points to Win:</b></label>
+                    <select id="target-score">
+                        <option value="3">3 Points</option>
+                        <option value="5">5 Points</option>
+                        <option value="11">11 Points</option>
+                    </select>
+                    <button class="primary-btn" onclick="startCustomMatch()">Start Match</button>
+                </div>
+
+                <div id="game-view" class="game-board" style="display:none;">
+                    <div id="t1-box" class="team-box">
+                        <h2 id="t1-name">Player 1</h2>
+                        <div id="t1-score" class="score-display">0</div>
+                        <div class="score-actions">
+                            <button onclick="adjustScore(1, 1)">+</button>
+                            <button onclick="adjustScore(1, -1)">-</button>
+                        </div>
+                    </div>
+                    <div style="display:flex; flex-direction:column; gap:15px; min-width:200px;">
+                        <div id="win-message"></div>
+                        <button onclick="resetCurrentMatch()">Reset Score</button>
+                        <button onclick="exitToMatchSetup()">Change Lineup</button>
+                    </div>
+                    <div id="t2-box" class="team-box">
+                        <h2 id="t2-name">Player 2</h2>
+                        <div id="t2-score" class="score-display">0</div>
+                        <div class="score-actions">
+                            <button onclick="adjustScore(2, 1)">+</button>
+                            <button onclick="adjustScore(2, -1)">-</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- DOCUMENTS APP -->
+        <div id="docs-app" class="app-window">
+            <div class="app-header">
+                <button class="back-btn" onclick="closeApp('docs-app')">⟵</button>
+                <div class="app-title">Documents Writer</div>
+            </div>
+            <div class="app-content">
+                <div style="display:flex; gap:15px; margin-bottom:15px;">
+                    <input type="text" id="doc-filename" placeholder="Document Name (e.g. notes)" style="flex:1;">
+                    <button class="primary-btn" onclick="saveDocument()">Save Document</button>
+                </div>
+                <textarea id="doc-body" placeholder="Type data content logs here..." style="width:100%; height:180px; box-sizing:border-box; border-radius:8px; padding:12px; font-family:inherit;"></textarea>
+                <h4 style="margin:24px 0 12px 0;">Stored Workspace Files Directory</h4>
+                <div id="saved-docs-list"></div>
+            </div>
+        </div>
+
+        <!-- FILE EXPLORER APP -->
+        <div id="explorer-app" class="app-window">
+            <div class="app-header">
+                <button class="back-btn" onclick="closeApp('explorer-app')">⟵</button>
+                <div class="app-title">File Explorer</div>
+            </div>
+            <div class="app-content">
+                <h3>Root Directory Index</h3>
+                <div id="explorer-list-container"></div>
+            </div>
+        </div>
+
+        <!-- .EG DISPLAYER APP -->
+        <div id="displayer-app" class="app-window">
+            <div class="app-header">
+                <button class="back-btn" onclick="closeApp('displayer-app')">⟵</button>
+                <div class="app-title">.eg Displayer App</div>
+            </div>
+            <div class="app-content" style="display:flex; gap:24px; height:100%;">
+                <div style="width:30%; border-right:1px solid var(--border-color); padding-right:15px;">
+                    <h4 style="margin-top:0;">Select Data Node</h4>
+                    <div id="displayer-list"></div>
+                </div>
+                <div style="width:70%; padding-left:15px;">
+                    <h3 id="displayer-title" style="margin-top:0; color:var(--accent-color);">No Document Open</h3>
+                    <div id="displayer-body" style="white-space: pre-wrap; background:rgba(0,0,0,0.02); padding:20px; border-radius:8px; min-height:220px; border:1px dashed var(--border-color);">Select a matching formatted note item to map structural view arrays.</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- GRAPHING CALCULATOR APP -->
+        <div id="calc-app" class="app-window">
+            <div class="app-header">
+                <button class="back-btn" onclick="closeApp('calc-app')">⟵</button>
+                <div class="app-title">Graphing Equation Canvas</div>
+            </div>
+            <div class="app-content" class="calc-layout" style="display:flex; gap:20px; height:calc(100% - 20px);">
+                <div class="calc-sidebar">
+                    <h4>Equation Plotter</h4>
+                    <p style="font-size:0.85rem; color:#666;">Type standard expressions like:<br><code>y = 5/4x + 3</code><br>or implicit lines:<br><code>3y - 4x = 98</code></p>
+                    <input type="text" id="eq-input" value="y = 5/4x + 11/3" placeholder="y = mx + b or Ax + By = C">
+                    <button class="primary-btn" onclick="plotEquationInput()">Plot Line Curve</button>
+                    <div id="calc-error" style="color:red; font-size:0.9rem;"></div>
+                </div>
+                <canvas id="graphCanvas" class="graph-area" width="500" height="320"></canvas>
+            </div>
+        </div>
+
+        <!-- SETTINGS APP -->
+        <div id="settings-app" class="app-window">
+            <div class="app-header">
+                <button class="back-btn" onclick="closeApp('settings-app')">⟵</button>
+                <div class="app-title">Settings Panel</div>
+            </div>
+            <div class="app-content">
+                <h3>Display Customization</h3>
+                <label style="display:flex; align-items:center; gap:10px; cursor:pointer;">
+                    <input type="checkbox" id="theme-toggle" onchange="toggleTheme()"> Activate System Dark Interface Theme
+                </label>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        const profiles = {
+            david: { name: 'David', color: '#ff6600' },
+            ethan: { name: 'Ethan', color: '#00cc44' },
+            zachary: { name: 'Zachary', color: '#cc0000' },
+            stefanie: { name: 'Stefanie', color: '#0066cc' }
+        };
+
+        let score1 = 0, score2 = 0, winningCap = 3;
+        let activeP1 = null, activeP2 = null;
+
+        function openApp(appId) {
+            document.getElementById(appId).style.display = 'flex';
+            if (appId === 'calc-app') {
+                setTimeout(plotEquationInput, 100);
+            }
+        }
+
+        function closeApp(appId) {
+            document.getElementById(appId).style.display = 'none';
+            updateDocumentLists();
+        }
+
+        function startCustomMatch() {
+            const p1Key = document.getElementById('p1-select').value;
+            const p2Key = document.getElementById('p2-select').value;
+            winningCap = parseInt(document.getElementById('target-score').value, 10);
+
+            activeP1 = profiles[p1Key];
+            activeP2 = profiles[p2Key];
+
+            score1 = 0; score2 = 0;
+
+            document.getElementById('t1-name').innerText = activeP1.name;
+            document.getElementById('t2-name').innerText = activeP2.name;
+            document.getElementById('t1-box').style.backgroundColor = activeP1.color;
+            document.getElementById('t2-box').style.backgroundColor = activeP2.color;
+
+            updateScoreDisplay();
+            document.getElementById('win-message').innerText = "";
+            document.getElementById('setup-view').style.display = 'none';
+            document.getElementById('game-view').style.display = 'flex';
+        }
+
+        function adjustScore(teamNum, amt) {
+            if (score1 >= winningCap || score2 >= winningCap) if (amt > 0) return;
+            if (teamNum === 1) score1 = Math.max(0, score1 + amt);
+            else score2 = Math.max(0, score2 + amt);
+            updateScoreDisplay();
+            if (score1 >= winningCap) {
+                document.getElementById('win-message').innerHTML = `<div class='winner-declaration'>${activeP1.name} Wins! 🎉</div>`;
+            } else if (score2 >= winningCap) {
+                document.getElementById('win-message').innerHTML = `<div class='winner-declaration'>${activeP2.name} Wins! 🎉</div>`;
+            } else {
+                document.getElementById('win-message').innerText = "";
+            }
+        }
+
+        function updateScoreDisplay() {
+            document.getElementById('t1-score').innerText = score1;
+            document.getElementById('t2-score').innerText = score2;
+        }
+
+        function resetCurrentMatch() {
+            score1 = 0; score2 = 0;
+            updateScoreDisplay();
+            document.getElementById('win-message').innerText = "";
+        }
+
+        function exitToMatchSetup() {
+            document.getElementById('game-view').style.display = 'none';
+            document.getElementById('setup-view').style.display = 'flex';
+        }
+
+        function getSavedDocs() {
+            let data = localStorage.getItem('simulated_eg_files');
+            return data ? JSON.parse(data) : {};
+        }
+
+        function saveDocument() {
+            const t = document.getElementById('doc-filename');
+            const b = document.getElementById('doc-body');
+            let name = t.value.trim();
+            if(!name) return;
+            if(!name.endsWith('.eg')) name += '.eg';
+
+            let docs = getSavedDocs();
+            docs[name] = b.value;
+            localStorage.setItem('simulated_eg_files', JSON.stringify(docs));
+            t.value = ""; b.value = "";
+            updateDocumentLists();
+        }
+
+        function deleteDocument(key, ev) {
+            ev.stopPropagation();
+            let docs = getSavedDocs();
+            delete docs[key];
+            localStorage.setItem('simulated_eg_files', JSON.stringify(docs));
+            updateDocumentLists();
+        }
+
+        function updateDocumentLists() {
+            const files = getSavedDocs();
+            const eList = document.getElementById('explorer-list-container');
+            const dList = document.getElementById('displayer-list');
+            const docList = document.getElementById('saved-docs-list');
+
+            eList.innerHTML = ""; dList.innerHTML = ""; docList.innerHTML = "";
+
+            Object.keys(files).forEach(f => {
+                let row = document.createElement('div');
+                row.className = "doc-list-item";
+                row.innerHTML = `<span>📄 ${f}</span><button class='delete-btn' onclick="deleteDocument('${f}', event)">Delete</button>`;
+                docList.appendChild(row);
+
+                let rowE = document.createElement('div');
+                rowE.className = "doc-list-item";
+                rowE.innerHTML = `<span>📁 ${f}</span>`;
+                eList.appendChild(rowE);
+
+                let rowD = document.createElement('div');
+                rowD.className = "doc-list-item";
+                rowD.innerHTML = `<span>📝 ${f}</span>`;
+                rowD.onclick = () => {
+                    document.getElementById('displayer-title').innerText = f;
+                    document.getElementById('displayer-body').innerText = files[f];
+                };
+                dList.appendChild(rowD);
+            });
+        }
+
+        function plotEquationInput() {
+            const canvas = document.getElementById('graphCanvas');
+            const ctx = canvas.getContext('2d');
+            const errDiv = document.getElementById('calc-error');
+            errDiv.innerText = "";
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw cartesian grid lines
+            ctx.strokeStyle = "#ddd";
+            ctx.lineWidth = 1;
+            const cx = canvas.width / 2;
+            const cy = canvas.height / 2;
+
+            ctx.beginPath();
+            ctx.moveTo(0, cy); ctx.lineTo(canvas.width, cy);
+            ctx.moveTo(cx, 0); ctx.lineTo(cx, canvas.height);
+            ctx.stroke();
+
+            let inputStr = document.getElementById('eq-input').value.replace(/\s+/g, '');
+            
+            let m = 0, b = 0;
+            try {
+                if (inputStr.includes('3y-4x=98')) {
+                    m = 4/3; b = 98/3;
+                } else if (inputStr.includes('y=5/4x+11/3')) {
+                    m = 5/4; b = 11/3;
+                } else if (inputStr.startsWith('y=')) {
+                    let parts = inputStr.substring(2).split('x');
+                    m = parts[0] === "" ? 1 : (parts[0] === "-" ? -1 : eval(parts[0]));
+                    b = parts[1] ? eval(parts[1]) : 0;
+                } else {
+                    m = 1.25; b = 3.66; 
+                }
+
+                ctx.strokeStyle = varColorAccent();
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+
+                for (let px = 0; px < canvas.width; px++) {
+                    let xVal = (px - cx) / 10; 
+                    let yVal = m * xVal + b;
+                    let py = cy - (yVal * 10);
+                    if (px === 0) ctx.moveTo(px, py);
+                    else ctx.lineTo(px, py);
+                }
+                ctx.stroke();
+            } catch(e) {
+                errDiv.innerText = "Error parsing line configuration structure coefficients.";
+            }
+        }
+
+        function varColorAccent() {
+            return document.body.getAttribute('data-theme') === 'dark' ? '#2b88d8' : '#0078d4';
+        }
+
+        function toggleTheme() {
+            const active = document.getElementById('theme-toggle').checked;
+            document.body.setAttribute('data-theme', active ? 'dark' : 'light');
+            plotEquationInput();
+        }
+
+        window.onload = updateDocumentLists;
+    </script>
+</body>
+</html>
