@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>A-EFIS Live GPS</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;user-select:none;-webkit-user-select:none;touch-action:none}
+body,html{width:100%;height:100%;background:#000;overflow:hidden;font-family:monospace}
+canvas{display:block;width:100%;height:100%}
+#controls{position:absolute;top:8px;left:8px;z-index:10;display:flex;gap:6px}
+button{background:rgba(15,15,15,.9);color:#0f0;border:1.5px solid #0f0;padding:8px 10px;font-family:monospace;font-size:12px;font-weight:bold;border-radius:4px}
+button.active{background:#0f0;color:#000}
+button.warn{border-color:#fa0;color:#fa0}
+#status{position:absolute;bottom:8px;left:8px;right:8px;text-align:right;color:#fa0;font-size:11px;font-weight:bold;background:rgba(0,0,0,.8);padding:5px 8px;border:1px solid #444;border-radius:3px;pointer-events:none}
+</style>
+</head>
+<body>
+<div id="controls">
+  <button id="btn-start" class="warn">START SENSORS</button>
+  <button id="btn-cal">CAL LEVEL</button>
+  <button id="btn-units">KT / FT</button>
+</div>
+<div id="status">TAP "START SENSORS" TO BEGIN</div>
+<canvas id="efis"></canvas>
+
+<script>
+const canvas = document.getElementById('efis');
+const ctx = canvas.getContext('2d');
+const statusEl = document.getElementById('status');
+
+const S = {
+  gps: false, acc: null,
+  rawP: 0, rawR: 0, offP: 0, offR: 0, pitch: 0, roll: 0,
+  hdg: 0, spd: 0, alt: 0, vsi: 0,
+  lastAlt: null, lastAltT: null,
+  slip: 0, g: 1.0, metric: false
+};
+
+function setStatus(txt, ok) {
+  statusEl.textContent = txt;
+  statusEl.style.color = ok ? '#0f0' : '#fa0';
+}
+
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = innerWidth * dpr;
+  canvas.height = innerHeight * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+addEventListener('resize', resize);
+resize();
+
+document.getElementById('btn-cal').addEventListener('click', () => {
+  S.offP = S.rawP;
+  S.offR = S.rawR;
+  setStatus('HORIZON ZEROED TO CURRENT ANGLE', true);
+});
+
+document.getElementById('btn-units').addEventListener('click', e => {
+  S.metric = !S.metric;
+  e.target.textContent = S.metric ? 'KMH / M' : 'KT / FT';
+});
+
+document.getElementById('btn-start').addEventListener('click', () => {
+  if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+    DeviceMotionEvent.requestPermission().then(r => {
+      if (r === 'granted') startSensors();
+      else setStatus('MOTION PERMISSION DENIED', false);
+    }).catch(e => setStatus('ERR: ' + e.message, false));
+  } else {
+    startSensors();
+  }
+});
+
+function startSensors() {
+  const btn = document.getElementById('btn-start');
+  btn.textContent = 'SENSORS ON';
+  btn.className = 'active';
+  setStatus('SEARCHING FOR GPS SATELLITES...', false);
+
+  // 1. Live GPS Speed, Altitude, VSI & Track
+  if ('geolocation' in navigator) {
+    navigator.geolocation.watchPosition(p => {
+      const now = performance.now(), c = p.coords;
+      S.gps = true;
+      S.acc = c.accuracy ? Math.round(c.accuracy) : null;
+      S.spd = (c.speed !== null && !isNaN(c.speed)) ? c.speed * 1.943844 : 0;
+
+      if (c.altitude !== null && !isNaN(c.altitude)) {
+        const ft = c.altitude * 3.28084;
+        if (S.lastAlt !== null && S.lastAltT !== null) {
+          const dtMin = (now - S.lastAltT) / 60000;
+          if (dtMin > 0.01) S.vsi = S.vsi * 0.6 + ((ft - S.lastAlt) / dtMin) * 0.4;
+        }
+        S.alt = S.lastAlt = ft;
+        S.lastAltT = now;
+      }
+      if (c.heading !== null && !isNaN(c.heading) && S.spd > 3) S.hdg = c.heading;
+      setStatus('GPS LOCKED' + (S.acc ? ` (±${S.acc}m)` : ''), true);
+    }, e => {
+      S.gps = false;
+      const reasons = {1:'GPS BLOCKED BY APP/HTTPS',2:'NO SATELLITE FIX (GO OUTSIDE)',3:'GPS TIMEOUT'};
+      setStatus(reasons[e.code] || ('GPS ERR: ' + e.message), false);
+    }, { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 });
+  } else {
+    setStatus('GPS NOT SUPPORTED IN THIS BROWSER', false);
+  }
+
+  // 2. Gimbal-Lock-Free 3D Gravity Vector Attitude (Fixes 45°->90° bug)
+  addEventListener('devicemotion', e => {
+    const a = e.accelerationIncludingGravity;
+    if (!a || a.x === null || a.y === null || a.z === null) return;
+
+    const mag = Math.hypot(a.x, a.y, a.z);
+    if (mag < 0.1) return;
+    S.g = S.g * 0.85 + (mag / 9.80665) * 0.15;
+
+    const ang = (screen.orientation && screen.orientation.angle) || window.orientation || 0;
+    let gx = a.x, gy = a.y, gz = a.z;
+    if (ang === 90) { gx = -a.y; gy = a.x; }
+    else if (ang === -90 || ang === 270) { gx = a.y; gy = -a.x; }
+    else if (ang === 180) { gx = -a.x; gy = -a.y; }
+
+    // True roll & pitch from gravity vector (no Euler gimbal lock)
+    const calcRoll = Math.atan2(-gx, gy) * 180 / Math.PI;
+    const calcPitch = Math.atan2(gz, Math.hypot(gx, gy)) * 180 / Math.PI;
+
+    S.rawR = S.rawR * 0.7 + calcRoll * 0.3;
+    S.rawP = S.rawP * 0.7 + calcPitch * 0.3;
+
+    S.roll = Math.max(-180, Math.min(180, S.rawR - S.offR));
+    S.pitch = Math.max(-85, Math.min(85, S.rawP - S.offP));
+    S.slip = S.slip * 0.8 + Math.max(-1, Math.min(1, -gx / 5.0)) * 0.2;
+  });
+
+  // 3. Magnetic Compass when stationary
+  addEventListener('deviceorientation', e => {
+    if (S.spd <= 3) {
+      if (e.webkitCompassHeading !== undefined) S.hdg = e.webkitCompassHeading;
+      else if (e.alpha !== null) S.hdg = (360 - e.alpha) % 360;
+    }
+  });
+}
+
+function drawTape(x, y, w, h, val, step, pxU, left, lbl) {
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(x, y, w, h);
+  ctx.strokeStyle = 'rgba(255,255,255,.5)'; ctx.strokeRect(x, y, w, h);
+  ctx.fillStyle = '#0f0'; ctx.font = 'bold 11px monospace'; ctx.textAlign = 'center';
+  ctx.fillText(lbl, x + w / 2, y - 6);
+
+  ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();
+  const cy = y + h / 2;
+  const minV = Math.floor((val - (h / 2) / pxU) / step) * step;
+  const maxV = Math.ceil((val + (h / 2) / pxU) / step) * step;
+  ctx.fillStyle = '#fff'; ctx.strokeStyle = '#fff'; ctx.font = 'bold 12px monospace'; ctx.textBaseline = 'middle';
+
+  for (let v = minV; v <= maxV; v += step) {
+    if (v < 0) continue;
+    const ty = cy - (v - val) * pxU;
+    ctx.beginPath();
+    if (left) {
+      ctx.moveTo(x + w, ty); ctx.lineTo(x + w - 8, ty);
+      ctx.textAlign = 'right'; ctx.fillText(v, x + w - 10, ty);
+    } else {
+      ctx.moveTo(x, ty); ctx.lineTo(x + 8, ty);
+      ctx.textAlign = 'left'; ctx.fillText(v, x + 10, ty);
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  const bh = 30, bw = w + 10, bx = left ? x - 3 : x - 7, by = cy - bh / 2;
+  ctx.fillStyle = '#000'; ctx.strokeStyle = S.gps ? '#0f0' : '#fa0'; ctx.lineWidth = 2;
+  ctx.fillRect(bx, by, bw, bh); ctx.strokeRect(bx, by, bw, bh);
+  ctx.fillStyle = S.gps ? '#0f0' : '#fa0'; ctx.font = 'bold 15px monospace';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(S.gps ? Math.round(val) : '---', bx + bw / 2, cy);
+}
+
+function loop() {
+  const w = innerWidth, h = innerHeight, cx = w / 2, cy = h * 0.38;
+  ctx.clearRect(0, 0, w, h);
+
+  // Horizon
+  ctx.save(); ctx.translate(cx, cy); ctx.rotate(-S.roll * Math.PI / 180);
+  const pScale = h / 55, pOff = S.pitch * pScale, diag = Math.hypot(w, h) * 1.5;
+  ctx.fillStyle = '#1b6dc1'; ctx.fillRect(-diag, -diag + pOff, diag * 2, diag);
+  ctx.fillStyle = '#754719'; ctx.fillRect(-diag, pOff, diag * 2, diag);
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.5;
+  ctx.beginPath(); ctx.moveTo(-diag, pOff); ctx.lineTo(diag, pOff); ctx.stroke();
+
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 12px monospace'; ctx.textBaseline = 'middle';
+  for (let d = -80; d <= 80; d += 5) {
+    if (!d) continue;
+    const y = pOff - d * pScale;
+    if (Math.abs(y) > h * 0.34) continue;
+    const maj = d % 10 === 0, len = maj ? 45 : 22;
+    ctx.lineWidth = maj ? 2 : 1.5;
+    ctx.setLineDash(d < 0 ? [6, 6] : []);
+    ctx.beginPath(); ctx.moveTo(-len, y); ctx.lineTo(len, y); ctx.stroke();
+    ctx.setLineDash([]);
+    if (maj) {
+      ctx.textAlign = 'right'; ctx.fillText(Math.abs(d), -len - 6, y);
+      ctx.textAlign = 'left'; ctx.fillText(Math.abs(d), len + 6, y);
+    }
+  }
+  ctx.restore();
+
+  // Roll Arc & Reticle
+  const rRad = Math.min(w, h) * 0.32;
+  ctx.save(); ctx.translate(cx, cy);
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(0, 0, rRad, -150 * Math.PI / 180, -30 * Math.PI / 180); ctx.stroke();
+  [-60,-45,-30,-20,-10,0,10,20,30,45,60].forEach(d => {
+    const r = (d - 90) * Math.PI / 180, l = d % 30 === 0 ? 12 : 7;
+    ctx.beginPath(); ctx.moveTo(Math.cos(r)*rRad, Math.sin(r)*rRad); ctx.lineTo(Math.cos(r)*(rRad+l), Math.sin(r)*(rRad+l)); ctx.stroke();
+  });
+  ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(0,-rRad-2); ctx.lineTo(-7,-rRad-13); ctx.lineTo(7,-rRad-13); ctx.fill();
+  ctx.rotate(-S.roll * Math.PI / 180);
+  ctx.fillStyle = '#ffd700'; ctx.beginPath(); ctx.moveTo(0,-rRad+2); ctx.lineTo(-7,-rRad+13); ctx.lineTo(7,-rRad+13); ctx.fill();
+  ctx.restore();
+
+  ctx.strokeStyle = '#ffd700'; ctx.fillStyle = '#ffd700'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(cx-75,cy); ctx.lineTo(cx-35,cy); ctx.lineTo(cx-35,cy+9);
+  ctx.moveTo(cx+75,cy); ctx.lineTo(cx+35,cy); ctx.lineTo(cx+35,cy+9); ctx.stroke();
+  ctx.beginPath(); ctx.arc(cx,cy,3.5,0,Math.PI*2); ctx.fill();
+
+  // Tapes & VSI
+  const tW = Math.min(58, w * 0.16), tH = h * 0.44, tY = cy - tH / 2;
+  drawTape(8, tY, tW, tH, S.metric ? S.spd * 1.852 : S.spd, 10, 4.0, true, S.metric ? 'GS KMH' : 'GS KT');
+  drawTape(w - tW - 34, tY, tW, tH, S.metric ? S.alt * 0.3048 : S.alt, 100, 0.4, false, S.metric ? 'ALT M' : 'ALT FT');
+
+  const vx = w - 28;
+  ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(vx, tY, 22, tH);
+  ctx.strokeStyle = 'rgba(255,255,255,.4)'; ctx.strokeRect(vx, tY, 22, tH);
+  const bh = (Math.max(-2000, Math.min(2000, S.vsi)) / 2000) * (tH / 2);
+if (S.gps) { ctx.fillStyle = '#f0f'; ctx.fillRect(vx + 2, bh > 0 ? cy - bh : cy, 5, Math.abs(bh)); }
+ctx.fillStyle = S.gps ? '#0f0' : '#fa0'; ctx.font = 'bold 11px monospace'; ctx.textAlign = 'center';
+ctx.fillText(S.gps ? Math.round(S.vsi / 10) * 10 : '---', vx + 11, tY - 6);
+// Slip Ball
+const ty = cy + rRad * 0.72;
+ctx.fillStyle = 'rgba(0,0,0,.65)'; ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5;
+ctx.fillRect(cx - 60, ty, 120, 20); ctx.strokeRect(cx - 60, ty, 120, 20);
+ctx.beginPath(); ctx.moveTo(cx-10,ty); ctx.lineTo(cx-10,ty+20); ctx.moveTo(cx+10,ty); ctx.lineTo(cx+10,ty+20); ctx.stroke();
+ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(cx + S.slip * 50, ty + 10, 7, 0, Math.PI * 2); ctx.fill();
+// HSI Compass
+const hRad = Math.min(w * 0.25, h * 0.18, 95), hy = h - hRad - 28;
+ctx.save(); ctx.translate(cx, hy);
+ctx.fillStyle = 'rgba(0,0,0,.8)'; ctx.beginPath(); ctx.arc(0, 0, hRad, 0, Math.PI * 2); ctx.fill();
+ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+ctx.save(); ctx.rotate(-S.hdg * Math.PI / 180);
+const cards = {0:'N',90:'E',180:'S',270:'W'};
+ctx.font = 'bold 13px monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+for (let d = 0; d < 360; d += 10) {
+const r = (d - 90) * Math.PI / 180, maj = d % 30 === 0, tl = maj ? 10 : 5;
+ctx.strokeStyle = '#fff'; ctx.lineWidth = maj ? 2 : 1;
+ctx.beginPath(); ctx.moveTo(Math.cos(r)hRad, Math.sin(r)hRad); ctx.lineTo(Math.cos(r)(hRad-tl), Math.sin(r)(hRad-tl)); ctx.stroke();
+if (maj) {
+ctx.save(); ctx.translate(Math.cos(r)(hRad-20), Math.sin(r)(hRad-20)); ctx.rotate(d*Math.PI/180);
+ctx.fillStyle = cards[d] ? '#0f0' : '#fff'; ctx.fillText(cards[d] || d/10, 0, 0); ctx.restore();
+}
+}
+ctx.restore();
+ctx.fillStyle = '#000'; ctx.strokeStyle = '#0f0'; ctx.lineWidth = 2;
+ctx.fillRect(-26, -hRad - 14, 52, 22); ctx.strokeRect(-26, -hRad - 14, 52, 22);
+ctx.fillStyle = '#0f0'; ctx.font = 'bold 14px monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+ctx.fillText(Math.round(S.hdg).toString().padStart(3, '0') + '°', 0, -hRad - 3);
+ctx.strokeStyle = '#ffd700'; ctx.beginPath(); ctx.moveTo(0,-12); ctx.lineTo(0,12); ctx.moveTo(-12,0); ctx.lineTo(12,0); ctx.stroke();
+ctx.restore();
+// Telemetry
+ctx.fillStyle = '#0f0'; ctx.font = 'bold 12px monospace';
+ctx.textAlign = 'right'; ctx.fillText(G:${S.g.toFixed(1)}, w - 10, 56);
+ctx.fillText(S.spd > 3 ? 'TRK:GPS' : 'HDG:MAG', w - 10, 72);
+ctx.textAlign = 'left'; ctx.fillText(PITCH:${S.pitch.toFixed(0)}°, 10, h - 40);
+ctx.fillText(ROLL:${S.roll.toFixed(0)}°, 10, h - 26);
+requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
