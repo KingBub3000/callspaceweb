@@ -165,15 +165,166 @@ const hR=Math.min(w0.23,h0.14,72),hy=h-hR-10;ctx.save();ctx.translate(cx,hy);
 ctx.strokeStyle='#fff';ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(0,0,hR,0,Math.PI2);ctx.stroke();
 ctx.save();ctx.rotate(-S.hdgMath.PI/180);
 const cards={0:'N',90:'E',180:'S',270:'W'};ctx.font='bold 11px Arial';ctx.textAlign='center';ctx.textBaseline='middle';
-for(let d=0;d<360;d+=10){
-const r=(d-90)Math.PI/180,maj=d%30===0,tl=maj?8:4;ctx.beginPath();ctx.moveTo(Math.cos(r)hR,Math.sin(r)hR);ctx.lineTo(Math.cos(r)(hR-tl),Math.sin(r)(hR-tl));ctx.stroke();
-if(maj){ctx.save();ctx.translate(Math.cos(r)(hR-16),Math.sin(r)(hR-16));ctx.rotate(dMath.PI/180);ctx.fillText(cards[d]||d/10,0,0);ctx.restore();}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>A-EFIS PFD</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;user-select:none;-webkit-user-select:none;touch-action:none}
+body,html{width:100%;height:100%;background:#000;overflow:hidden;font-family:Arial,Helvetica,sans-serif}
+canvas{display:block;width:100%;height:100%}
+#menu-btn{position:absolute;top:8px;left:8px;z-index:20;background:rgba(0,0,0,.6);color:#fff;border:1.5px solid #fff;border-radius:4px;width:36px;height:32px;font-size:20px;line-height:28px;text-align:center}
+#drawer{position:absolute;top:0;left:-240px;width:230px;height:100%;background:#f2f2f2;color:#111;z-index:30;transition:left .22s ease;padding:14px;display:flex;flex-direction:column;gap:12px;box-shadow:4px 0 15px rgba(0,0,0,.8)}
+#drawer.open{left:0}
+#drawer h3{font-size:17px;border-bottom:1px solid #ccc;padding-bottom:8px;display:flex;justify-content:space-between;align-items:center}
+.m-btn{background:#fff;color:#111;border:1px solid #bbb;border-radius:6px;padding:12px;font-size:14px;font-weight:bold;text-align:left}
+.m-btn.on{background:#1b6dc1;color:#fff;border-color:#1b6dc1}
+#status-txt{font-size:11px;color:#444;margin-top:auto;line-height:1.4}
+</style>
+</head>
+<body>
+<div id="menu-btn">≡</div>
+<div id="drawer">
+  <h3><span>Main menu</span><span id="close-btn" style="font-size:20px;padding:0 6px">✕</span></h3>
+  <button id="btn-start" class="m-btn">Start Sensors & GPS</button>
+  <button id="btn-cal" class="m-btn">Calibrate Level (0°)</button>
+  <button id="btn-units" class="m-btn">Units: MPH / FT</button>
+  <div id="status-txt">Status: Tap "Start Sensors & GPS"</div>
+</div>
+<canvas id="efis"></canvas>
+
+<script>
+const c=document.getElementById('efis'),ctx=c.getContext('2d'),drawer=document.getElementById('drawer'),stEl=document.getElementById('status-txt');
+const S={gps:false,acc:null,lat:0,lon:0,rawP:0,rawR:0,offP:0,offR:0,pitch:0,roll:0,hdg:0,spd:0,alt:0,vsi:0,lastAlt:null,lastAltT:null,slip:0,g:1,gMax:1,metric:false};
+
+function resize(){const d=devicePixelRatio||1;c.width=innerWidth*d;c.height=innerHeight*d;ctx.setTransform(d,0,0,d,0,0);}
+addEventListener('resize',resize);resize();
+
+document.getElementById('menu-btn').onclick=()=>drawer.classList.add('open');
+document.getElementById('close-btn').onclick=()=>drawer.classList.remove('open');
+document.getElementById('btn-cal').onclick=()=>{S.offP=S.rawP;S.offR=S.rawR;stEl.textContent='Status: Horizon leveled to 0°';drawer.classList.remove('open');};
+document.getElementById('btn-units').onclick=e=>{S.metric=!S.metric;e.target.textContent=S.metric?'Units: KMH / M':'Units: MPH / FT';};
+
+document.getElementById('btn-start').onclick=e=>{
+  if(typeof DeviceOrientationEvent!=='undefined'&&typeof DeviceOrientationEvent.requestPermission==='function'){
+    DeviceOrientationEvent.requestPermission().then(r=>{if(r==='granted')startAll(e.target);else stEl.textContent='Status: Permission denied';});
+  }else startAll(e.target);
+};
+
+function startAll(btn){
+  btn.textContent='Sensors Active';btn.classList.add('on');stEl.textContent='Status: Searching for GPS...';drawer.classList.remove('open');
+  if('geolocation' in navigator){
+    navigator.geolocation.watchPosition(p=>{
+      const now=performance.now(),co=p.coords;S.gps=true;S.acc=co.accuracy?Math.round(co.accuracy):null;
+      S.lat=co.latitude;S.lon=co.longitude;
+      S.spd=(co.speed!==null&&!isNaN(co.speed))?co.speed*2.23694:0;
+      if(co.altitude!==null&&!isNaN(co.altitude)){
+        const ft=co.altitude*3.28084;
+        if(S.lastAlt!==null&&S.lastAltT!==null){const dm=(now-S.lastAltT)/60000;if(dm>0.01)S.vsi=S.vsi*0.75+((ft-S.lastAlt)/dm)*0.25;}
+        S.alt=S.lastAlt=ft;S.lastAltT=now;
+      }
+      if(co.heading!==null&&!isNaN(co.heading)&&S.spd>3)S.hdg=co.heading;
+      stEl.textContent='Status: GPS Locked (±'+(S.acc||'?')+'m)';
+    },err=>{S.gps=false;stEl.textContent='Status: GPS Err - '+err.message;},{enableHighAccuracy:true,maximumAge:0,timeout:10000});
+  }
+  addEventListener('deviceorientation',e=>{
+    if(e.beta===null||e.gamma===null)return;
+    const ang=(screen.orientation&&screen.orientation.angle)||window.orientation||0;
+    let p=e.beta,r=e.gamma;
+    if(ang===90){p=-e.gamma;r=e.beta;}else if(ang===-90||ang===270){p=e.gamma;r=-e.beta;}
+    S.rawP=p;S.rawR=r;
+    const tP=Math.max(-85,Math.min(85,p-S.offP)),tR=Math.max(-180,Math.min(180,r-S.offR));
+    S.pitch+=(tP-S.pitch)*0.12;S.roll+=(tR-S.roll)*0.12;
+    if(S.spd<=3){
+      let h=e.webkitCompassHeading!==undefined?e.webkitCompassHeading:(e.alpha!==null?(360-e.alpha)%360:S.hdg);
+      let diff=h-S.hdg;if(diff>180)diff-=360;if(diff<-180)diff+=360;
+      S.hdg=(S.hdg+diff*0.15+360)%360;
+    }
+  });
+  addEventListener('devicemotion',e=>{
+    const a=e.accelerationIncludingGravity;if(!a||a.x===null)return;
+    const g=Math.hypot(a.x,a.y,a.z)/9.80665;
+    S.g=S.g*0.9+g*0.1;if(S.g>S.gMax)S.gMax=S.g;
+    const ang=(screen.orientation&&screen.orientation.angle)||window.orientation||0;
+    const lat=(ang===90)?-a.y:(ang===-90||ang===270)?a.y:a.x;
+    S.slip=S.slip*0.9+Math.max(-1,Math.min(1,-lat/5))*0.1;
+  });
 }
-ctx.restore();
-ctx.beginPath();ctx.moveTo(0,-10);ctx.lineTo(0,10);ctx.moveTo(-10,0);ctx.lineTo(10,0);ctx.stroke();ctx.restore();
-requestAnimationFrame(loop);
-}
-requestAnimationFrame(loop);
+
+function loop(){
+  const w=innerWidth,h=innerHeight,cx=w/2,cy=h*0.44;ctx.clearRect(0,0,w,h);
+  // 1. 2-Color Horizon + Pitch Ladder
+  ctx.save();ctx.translate(cx,cy);ctx.rotate(-S.roll*Math.PI/180);
+  const pS=h/52,pO=S.pitch*pS,dg=Math.hypot(w,h)*1.6;
+  ctx.fillStyle='#1b6dc1';ctx.fillRect(-dg,-dg+pO,dg*2,dg);
+  ctx.fillStyle='#754719';ctx.fillRect(-dg,pO,dg*2,dg);
+  ctx.strokeStyle='#fff';ctx.lineWidth=2.5;ctx.beginPath();ctx.moveTo(-dg,pO);ctx.lineTo(dg,pO);ctx.stroke();
+  ctx.fillStyle='#fff';ctx.font='bold 13px Arial';ctx.textBaseline='middle';
+  for(let d=-80;d<=80;d+=5){
+    if(!d)continue;const y=pO-d*pS;if(Math.abs(y)>h*0.32)continue;
+    const maj=d%10===0,len=maj?42:20;ctx.lineWidth=2;ctx.beginPath();
+    if(d<0){for(let x=-len;x<len;x+=12){ctx.moveTo(x,y);ctx.lineTo(Math.min(len,x+6),y);}}
+    else{ctx.moveTo(-len,y);ctx.lineTo(len,y);}
+    ctx.stroke();
+    if(maj){ctx.textAlign='right';ctx.fillText(Math.abs(d),-len-6,y);ctx.textAlign='left';ctx.fillText(Math.abs(d),len+6,y);}
+  }
+  ctx.restore();
+
+  // 2. Top Full-Width Heading Tape
+  ctx.fillStyle='#111';ctx.fillRect(0,0,w,44);ctx.strokeStyle='#fff';ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(0,44);ctx.lineTo(w,44);ctx.stroke();
+  const pxDeg=w/90;ctx.fillStyle='#fff';ctx.font='bold 14px Arial';ctx.textAlign='center';
+  for(let d=Math.floor(S.hdg-50);d<=Math.ceil(S.hdg+50);d++){
+    if(d%5!==0)continue;const x=cx+(d-S.hdg)*pxDeg,hd=(d+360)%360,maj=hd%10===0;
+    ctx.beginPath();ctx.moveTo(x,44);ctx.lineTo(x,maj?34:39);ctx.stroke();
+    if(maj)ctx.fillText(hd===0?'360':hd.toString().padStart(3,'0'),x,24);
+  }
+  ctx.fillStyle='#000';ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.fillRect(cx-24,4,48,24);ctx.strokeRect(cx-24,4,48,24);
+  ctx.fillStyle='#fff';ctx.font='bold 16px Arial';ctx.fillText(Math.round(S.hdg).toString().padStart(3,'0'),cx,21);
+
+  // 3. Curved Roll Arc & Bottom Slip Arc
+  const rR=Math.min(w,h)*0.34;ctx.save();ctx.translate(cx,cy);ctx.strokeStyle='#fff';ctx.lineWidth=2;
+  ctx.beginPath();ctx.arc(0,0,rR,-145*Math.PI/180,-35*Math.PI/180);ctx.stroke();
+  const rTicks=[-45,-30,-20,-10,0,10,20,30,45];
+  for(let i=0;i<rTicks.length;i++){const d=rTicks[i],r=(d-90)*Math.PI/180,l=d%30===0?12:7;ctx.beginPath();ctx.moveTo(Math.cos(r)*rR,Math.sin(r)*rR);ctx.lineTo(Math.cos(r)*(rR+l),Math.sin(r)*(rR+l));ctx.stroke();}
+  ctx.fillStyle='#fff';ctx.beginPath();ctx.moveTo(0,-rR);ctx.lineTo(-7,-rR-12);ctx.lineTo(7,-rR-12);ctx.fill();
+  ctx.rotate(-S.roll*Math.PI/180);ctx.beginPath();ctx.moveTo(0,-rR);ctx.lineTo(-7,-rR+12);ctx.lineTo(7,-rR+12);ctx.fill();ctx.restore();
+
+  // Fixed W-Reticle
+  ctx.strokeStyle='#fff';ctx.lineWidth=3.5;ctx.beginPath();
+  ctx.moveTo(cx-65,cy);ctx.lineTo(cx-25,cy);ctx.lineTo(cx-12,cy+12);ctx.lineTo(cx,cy);ctx.lineTo(cx+12,cy+12);ctx.lineTo(cx+25,cy);ctx.lineTo(cx+65,cy);ctx.stroke();
+
+  // Curved Slip Tube
+  const sY=cy+rR*0.62;ctx.strokeStyle='#fff';ctx.lineWidth=2;
+  ctx.beginPath();ctx.arc(cx,cy,rR*0.62,65*Math.PI/180,115*Math.PI/180);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(cx-10,sY-7);ctx.lineTo(cx-10,sY+7);ctx.moveTo(cx+10,sY-7);ctx.lineTo(cx+10,sY+7);ctx.stroke();
+  ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(cx+S.slip*42,sY,6,0,Math.PI*2);ctx.fill();
+
+  // 4. Left G-Meter & Right VSI Scale
+  ctx.fillStyle='#fff';ctx.font='bold 12px Arial';ctx.textAlign='left';
+  ctx.fillText('G '+S.g.toFixed(1)+'/'+S.gMax.toFixed(1),8,62);
+  const gLbls=['03','02','01','00','01','02'];
+  for(let i=0;i<gLbls.length;i++)ctx.fillText(gLbls[i],8,cy-75+i*30);
+
+  ctx.textAlign='right';const vLbls=['12','6','0','6','12'];
+  for(let i=0;i<vLbls.length;i++)ctx.fillText(vLbls[i],w-8,cy-60+i*30);
+  ctx.save();ctx.translate(w-12,cy);ctx.rotate(-Math.PI/2);ctx.font='10px Arial';ctx.textAlign='center';ctx.fillText('ft/m x100',0,-14);ctx.restore();
+  const vsiY=cy-Math.max(-1200,Math.min(1200,S.vsi))/1200*60;
+  ctx.fillStyle='#fff';ctx.beginPath();ctx.moveTo(w-22,vsiY);ctx.lineTo(w-32,vsiY-6);ctx.lineTo(w-32,vsiY+6);ctx.fill();
+
+  // 5. Bottom Speed & Altitude Boxes + Lower Instrument Panel
+  const bY=h*0.68,spdV=S.metric?S.spd*1.60934:S.spd,altV=S.metric?S.alt*0.3048:S.alt;
+  ctx.fillStyle='#000';ctx.strokeStyle='#fff';ctx.lineWidth=2;
+  ctx.fillRect(6,bY,64,34);ctx.strokeRect(6,bY,64,34);
+  ctx.fillRect(w-76,bY,70,34);ctx.strokeRect(w-76,bY,70,34);
+  ctx.fillStyle='#fff';ctx.font='bold 22px Arial';ctx.textAlign='center';
+  ctx.fillText(S.gps?Math.round(spdV):'0',38,bY+25);
+  ctx.fillText(S.gps?Math.round(altV).toString().padStart(3,'0'):'000',w-41,bY+25);
+  ctx.font='bold 12px Arial';ctx.fillText(S.metric?'km/h':'mph',38,bY+48);ctx.fillText(S.metric?'m':'ft',w-41,bY+48);
+
+  // Lower Black Panel & HSI Rose
+  ctx.fillStyle='#000';ctx.fillRect(0,bY+54,w,h-(bY+54));
 </script>
 </body>
 </html>
